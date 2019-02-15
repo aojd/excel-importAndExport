@@ -1,11 +1,12 @@
+package top.aojd.bookstore.util.toolkit;
+
 import org.apache.commons.beanutils.BeanUtils;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
 import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.util.CellRangeAddress;
-import org.apache.poi.xssf.usermodel.XSSFCell;
-import org.apache.poi.xssf.usermodel.XSSFRow;
-import org.apache.poi.xssf.usermodel.XSSFSheet;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xssf.usermodel.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,24 +14,29 @@ import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.Map.Entry;
 
+/**
+ * 里面使用的所有行数都是从0开始的
+ * 使用的jar包
+ * <dependency>
+ * <groupId>org.apache.poi</groupId>
+ * <artifactId>poi-ooxml</artifactId>
+ * <version>3.17</version>
+ * </dependency>
+ * <dependency>
+ * <groupId>commons-beanutils</groupId>
+ * <artifactId>commons-beanutils</artifactId>
+ * <version>1.9.3</version>
+ * </dependency>
+ */
 public class ExcelUtil2 {
 
     /**
-     *
      * 将对象数组转换成excel<br/>
-     * <dependency>
-     * 	<groupId>org.apache.poi</groupId>
-     * 	<artifactId>poi-ooxml</artifactId>
-     * 	<version>3.17</version>
-     * </dependency>
-     * <dependency>
-     * 	<groupId>commons-beanutils</groupId>
-     * 	<artifactId>commons-beanutils</artifactId>
-     * 	<version>1.9.3</version>
-     * </dependency>
      *
      * @param pojoList  对象数组
      * @param out       输出流
@@ -39,24 +45,106 @@ public class ExcelUtil2 {
      * @throws Exception
      */
     public static <T> void pojo2Excel(List<T> pojoList, OutputStream out, LinkedHashMap<String, String> alias, UtilExcel utilExcel) throws Exception {
-        if (utilExcel == null) throw new Exception("UtilExcel 对象为空");
-
         //创建一个工作簿
         XSSFWorkbook wb = new XSSFWorkbook();
+        if (utilExcel == null) utilExcel = new UtilExcel();
         //创建一个表
         XSSFSheet sheet = wb.createSheet();
-        //创建第一行，作为表名
-        XSSFRow row = sheet.createRow(0);// 这个方法感觉是直接跳到对应行的
-        XSSFCell cell = row.createCell(0);
-        cell.setCellValue(utilExcel.getTableHeadName());
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, alias.size() - 1));
+        // 需要表头
+        if (utilExcel.getFieldRow() > utilExcel.getTableHeadRow()) {
+            //创建第一行，作为表名
+            XSSFRow row = sheet.createRow(utilExcel.getTableHeadRow());// 这个方法感觉是直接跳到对应行的
+            XSSFCell cell = row.createCell(0);
+            cell.setCellValue(utilExcel.getTableHeadName());
+
+            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, alias.size() - 1));
+        }
+
 
         // 在第一行插入列名
-        insertColumnName(utilExcel.getDataStarRow() - 1, sheet, alias);
+        insertColumnName(utilExcel.getFieldRow(), sheet, alias);
 
         // 从第指定行开始插入数据
         insertColumnDate(utilExcel.getDataStarRow(), pojoList, sheet, alias);
 
+        // 输出表格文件
+        try {
+            wb.write(out);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            wb.close();
+        }
+    }
+
+
+    /**
+     * 多个sheet导出excel 复杂表头或者非复杂表头<br/>
+     *
+     * @param exportList sheet对象的list
+     * @param out        输出流
+     * @throws Exception
+     */
+    public static <T> void pojo2ExcelSheetList(List<SheetExport> exportList, OutputStream out) throws Exception {
+        //创建一个工作簿
+        XSSFWorkbook wb = new XSSFWorkbook();
+        // 设置居中样式
+        XSSFCellStyle xssStyle = wb.createCellStyle();
+        xssStyle.setAlignment(HorizontalAlignment.CENTER);
+        xssStyle.setVerticalAlignment(VerticalAlignment.CENTER);
+
+        for (SheetExport sheetData : exportList) {
+            //创建一个表
+            XSSFSheet sheet = wb.createSheet(sheetData.getSheetName());
+            // 需要表头
+            if (sheetData.getUtilExcel().getFieldRow() > sheetData.getUtilExcel().getTableHeadRow()) {
+                XSSFRow row = sheet.createRow(sheetData.getUtilExcel().getTableHeadRow());// 这个方法感觉是直接跳到对应行的
+                XSSFCell cell = row.createCell(0);
+                cell.setCellValue(sheetData.getUtilExcel().getTableHeadName());
+                sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, sheetData.getAlias().size() - 1));
+
+                // 设置居中样式
+                cell.setCellStyle(xssStyle);
+            }
+            if (sheetData.getMergeDataList() == null) {
+                if (sheetData.getUtilExcel().getFieldRow() < sheetData.getUtilExcel().getDataStarRow()) {
+                    // 插入列名
+                    insertColumnName(sheetData.getUtilExcel().getFieldRow(), sheet, sheetData.getAlias());
+                    // 从第指定行开始插入数据
+                    insertColumnDate(sheetData.getUtilExcel().getDataStarRow(), sheetData.getPojoList(), sheet, sheetData.getAlias());
+                } else {
+                    insertColumnName(sheetData.getUtilExcel().getFieldRow(), sheet, sheetData.getAlias());
+                    insertColumnDate(sheetData.getUtilExcel().getFieldRow() + 1, sheetData.getPojoList(), sheet, sheetData.getAlias());
+                }
+            } else {
+                // 插入复杂表头(表的标题和字段名之间)
+                XSSFRow rowTable = sheet.createRow(sheetData.getUtilExcel().getTableHeadRow() + 1);
+                for (MergeData mergeData : sheetData.getMergeDataList()) {
+                    sheet.addMergedRegion(new CellRangeAddress(mergeData.getStartRow(), mergeData.getEndRow(), mergeData.getStartCol(), mergeData.getEndCol()));
+                    // 插入复杂表头的数据
+                    XSSFCell tableCellValue = rowTable.createCell(mergeData.getStartCol());
+                    tableCellValue.setCellValue(mergeData.getName());
+
+                    // 这里可以对单元格做样式处理
+                    // 设置居中样式
+                    tableCellValue.setCellStyle(xssStyle);
+                }
+                // 如果插入数据的行小于指定的数据行，就默认在复杂表头的下方
+                int maxHeadRow = 0;
+                for (MergeData me : sheetData.getMergeDataList()) {
+                    if (me.getEndRow() > maxHeadRow) maxHeadRow = me.getEndRow();
+                }
+                if (maxHeadRow < sheetData.getUtilExcel().getFieldRow() && sheetData.getUtilExcel().getFieldRow() < sheetData.getUtilExcel().getDataStarRow()) {
+                    // 插入列名
+                    insertColumnName(sheetData.getUtilExcel().getFieldRow(), sheet, sheetData.getAlias());
+                    // 从第指定行开始插入数据
+                    insertColumnDate(sheetData.getUtilExcel().getDataStarRow(), sheetData.getPojoList(), sheet, sheetData.getAlias());
+                } else {
+                    insertColumnName(maxHeadRow + 1, sheet, sheetData.getAlias());
+                    insertColumnDate(maxHeadRow + 2, sheetData.getPojoList(), sheet, sheetData.getAlias());
+                }
+            }
+        }
         // 输出表格文件
         try {
             wb.write(out);
@@ -81,37 +169,59 @@ public class ExcelUtil2 {
         if (utilExcel == null) throw new Exception("UtilExcel 对象为空");
         //创建一个工作簿
         XSSFWorkbook wb = new XSSFWorkbook();
+        // 设置居中样式
+        // 设置表头文字格式
+        // XSSFCellStyle cellStyle = wb.createCellStyle();
+        // XSSFFont font = wb.createFont();
+        // font.setFontName("宋体");
+        // font.setFontHeightInPoints((short) 36);
+        // cellStyle.setFont(font);
+        // cellStyle.setAlignment(HorizontalAlignment.CENTER);
+        XSSFCellStyle xssStyle = wb.createCellStyle();
+        xssStyle.setAlignment(HorizontalAlignment.CENTER);
+        xssStyle.setVerticalAlignment(VerticalAlignment.CENTER);
+
         //创建一个表
         XSSFSheet sheet = wb.createSheet();
-        //创建第一行，作为表名
-        XSSFRow row = sheet.createRow(0);// 后面不需要再次调用该方法，应该是使用该方法 可以独立设置该行的样式
-        XSSFCell cell = row.createCell(0);
-//        设置居中
-//        设置表头文字格式
-//        XSSFCellStyle cellStyle = wb.createCellStyle();
-//        XSSFFont font = wb.createFont();
-//        font.setFontName("宋体");
-//        font.setFontHeightInPoints((short) 36);
-//        cellStyle.setFont(font);
-//        cellStyle.setAlignment(HorizontalAlignment.CENTER);
-        cell.setCellValue(utilExcel.getTableHeadName());
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, alias.size() + 1));
-        // 插入复杂表头
-        XSSFRow rowTable = sheet.createRow(utilExcel.getDataStarRow() - 3);
-        for (MergeData mergeData : mergeDataList) {
-            sheet.addMergedRegion(new CellRangeAddress(mergeData.getStartRow(), mergeData.getEndRow(), mergeData.getStartCol(), mergeData.getEndCol()));
-//            插入数据
-            XSSFCell tableCellValue = rowTable.createCell(mergeData.getStartCol());
-            tableCellValue.setCellValue(mergeData.getName());
-            // 这里可以对单元格做样式处理
+        // 需要表头
+        if (utilExcel.getFieldRow() > utilExcel.getTableHeadRow()) {
+            //创建第一行，作为表名
+            XSSFRow row = sheet.createRow(utilExcel.getTableHeadRow());// 这个方法感觉是直接跳到对应行的 后面不需要再次调用该方法，应该是使用该方法 可以独立设置该行的样式
+            XSSFCell cell = row.createCell(0);
+            cell.setCellValue(utilExcel.getTableHeadName());
+            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, alias.size() - 1));
+
+            // 设置居中样式
+            cell.setCellStyle(xssStyle);
         }
 
-        // 在第一行插入列名
-        insertColumnName(utilExcel.getDataStarRow() - 1, sheet, alias);
+        // 插入复杂表头
+        XSSFRow rowTable = sheet.createRow(utilExcel.getTableHeadRow() + 1);
+        for (MergeData mergeData : mergeDataList) {
+            sheet.addMergedRegion(new CellRangeAddress(mergeData.getStartRow(), mergeData.getEndRow(), mergeData.getStartCol(), mergeData.getEndCol()));
+            // 插入数据
+            XSSFCell tableCellValue = rowTable.createCell(mergeData.getStartCol());
+            tableCellValue.setCellValue(mergeData.getName());
 
-        // 从第指定行开始插入数据
-        insertColumnDate(utilExcel.getDataStarRow(), pojoList, sheet, alias);
+            // 这里可以对单元格做样式处理
+            // 设置居中样式
+            tableCellValue.setCellStyle(xssStyle);
+        }
 
+        // 如果插入数据的行小于指定的数据行，就默认在复杂表头的下方
+        int maxHeadRow = 0;
+        for (MergeData me : mergeDataList) {
+            if (me.getEndRow() > maxHeadRow) maxHeadRow = me.getEndRow();
+        }
+        if (maxHeadRow < utilExcel.getFieldRow() && utilExcel.getFieldRow() < utilExcel.getDataStarRow()) {
+            // 插入列名
+            insertColumnName(utilExcel.getFieldRow(), sheet, alias);
+            // 从第指定行开始插入数据
+            insertColumnDate(utilExcel.getDataStarRow(), pojoList, sheet, alias);
+        } else {
+            insertColumnName(maxHeadRow + 1, sheet, alias);
+            insertColumnDate(maxHeadRow + 2, pojoList, sheet, alias);
+        }
         // 输出表格文件
         try {
             wb.write(out);
@@ -122,13 +232,12 @@ public class ExcelUtil2 {
         }
     }
 
-
     /**
      * 将excel表转换成指定类型的对象数组
      *
      * @param claz  类型
      * @param alias 列别名,格式要求：Map<"列名","类属性名">
-     * @param param 指定第几行行为字段名，第一行为1
+     * @param param 指定第几行行为字段名(数据在字段的下一行，默认)，第一行为0
      * @return
      * @throws IOException
      * @throws IllegalArgumentException
@@ -156,6 +265,25 @@ public class ExcelUtil2 {
         }
     }
 
+    public static <T> List<T> excel2PojoSheetList(List<SheetImport> list, InputStream inputStream) throws IOException {
+        XSSFWorkbook wb = new XSSFWorkbook(inputStream);
+        List<T> pojoList = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            try {
+                XSSFSheet sheet = wb.getSheetAt(i);
+                //生成属性和列对应关系的map，Map<类属性名，对应一行的第几列>
+                Map<String, Integer> propertyMap = generateColumnPropertyMap(sheet, list.get(i).getAlias(), list.get(i).getParam());
+                //根据指定的映射关系进行转换
+                pojoList.add((T) generateList(sheet, propertyMap, list.get(i).getClaz(), list.get(i).getParam()));
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                wb.close();
+            }
+        }
+        return pojoList;
+    }
 
     /**
      * 将对象数组转换成excel
@@ -242,9 +370,9 @@ public class ExcelUtil2 {
         Set<Entry<String, String>> entrySet = alias.entrySet();
 
         for (Entry<String, String> entry : entrySet) {
-            //创建第一行的第columnCount个格子
+            // 创建第一行的第columnCount个格子
             XSSFCell cell = row.createCell(columnCount++);
-            //将此格子的值设置为alias中的键名
+            // 将此格子的值设置为alias中的键名
             cell.setCellValue(isNull(entry.getValue()).toString());
         }
     }
@@ -260,45 +388,45 @@ public class ExcelUtil2 {
      */
     private static <T> void insertColumnDate(int beginRowNum, List<T> models, XSSFSheet sheet, Map<String, String> alias) throws Exception {
         for (T model : models) {
-            //创建新的一行
+            // 创建新的一行
             XSSFRow rowTemp = sheet.createRow(beginRowNum++);
-            //获取列的迭代
+            // 获取列的迭代
             Set<Entry<String, String>> entrySet = alias.entrySet();
 
-            //从第0个格子开始创建
+            // 从第0个格子开始创建
             int columnNum = 0;
             for (Entry<String, String> entry : entrySet) {
-                //获取属性值
+                // 获取属性值
                 String property = BeanUtils.getProperty(model, entry.getKey());
-                //创建一个格子
+                // 创建一个格子
                 XSSFCell cell = rowTemp.createCell(columnNum++);
                 // 得知string可以转化的类型
-                if (isDouble(property)){
+                if (isDouble(property)) {
                     cell.setCellValue(Double.valueOf(property));
-                }else if (isInt(property)){
+                } else if (isInt(property)) {
                     cell.setCellValue(Integer.valueOf(property));
-                }else if (isDateAndTime(property)){
+                } else if (isDateAndTime(property)) {
                     // 只对日期加time的做转化
                     SimpleDateFormat formatter;
-                    if (property.indexOf("-") >= 1){
+                    if (property.indexOf("-") >= 1) {
                         formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                    }else if(property.indexOf("/") >= 1){
+                    } else if (property.indexOf("/") >= 1) {
                         formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                    }else if(property.indexOf(".") >= 1){
+                    } else if (property.indexOf(".") >= 1) {
                         formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                    }else {
+                    } else {
                         formatter = new SimpleDateFormat("yyyyMMdd HH:mm:ss");
                     }
                     Date date = formatter.parse(property);
                     cell.setCellValue(date);
-                }else {
+                } else {
                     cell.setCellValue(property);
                 }
             }
         }
     }
 
-    //判断是否为空，若为空设为""
+    // 判断是否为空，若为空设为""
     private static Object isNull(Object object) {
         if (object != null) {
             return object;
@@ -327,9 +455,9 @@ public class ExcelUtil2 {
             if (cell == null) {
                 continue;
             }
-            //列名
+            // 列名
             String cellValue = cell.getStringCellValue();
-            //对应属性名
+            // 对应属性名
             String propertyName = alias.get(cellValue);
             propertyMap.put(propertyName, i);
         }
@@ -349,11 +477,11 @@ public class ExcelUtil2 {
      */
     private static <T> List<T> generateList(XSSFSheet sheet, Map<String, Integer> propertyMap, Class<T> claz, Integer param) throws Exception {
         if (param == null || param < 0) param = 1;
-        //对象数组
+        // 对象数组
         List<T> pojoList = new ArrayList<>();
         int index = 0;
         for (Row row : sheet) {
-            //跳过标题和列名
+            // 跳过标题和列名
             if (row.getRowNum() < param + 1) {
                 continue;
             }
@@ -380,15 +508,22 @@ public class ExcelUtil2 {
                         BeanUtils.setProperty(instance, entry.getKey(), null);
                         break;
                     case NUMERIC:
-                        int pInt = (int) row.getCell(entry.getValue()).getNumericCellValue();
-                        BeanUtils.setProperty(instance, entry.getKey(), pInt);
-                        break;
+                        int numericType = row.getCell(entry.getValue()).getCellStyle().getDataFormat();
+                        if (numericType == 0) {// 数字类型
+                            int pInt = (int) row.getCell(entry.getValue()).getNumericCellValue();
+                            BeanUtils.setProperty(instance, entry.getKey(), pInt);
+                            break;
+                        } else {
+                            Date date = row.getCell(entry.getValue()).getDateCellValue();
+                            BeanUtils.setProperty(instance, entry.getKey(), date);
+                            break;
+                        }
                     case STRING:
                         String pString = row.getCell(entry.getValue()).getStringCellValue();
                         BeanUtils.setProperty(instance, entry.getKey(), pString);
                         break;
                     case FORMULA:
-                        System.out.println("****************************【公式】没做处理");
+                        System.out.println("**该类型【FORMULA】未做处理，因为没见过这种类型，于ExcelUtil2.generateList方法中修改！");
                         break;
                     case BOOLEAN:
                         boolean pBoolean = row.getCell(entry.getValue()).getBooleanCellValue();
@@ -438,32 +573,87 @@ public class ExcelUtil2 {
     private static boolean isDouble(String str) {
         return str.matches("^[-+]?[1-9][0-9]*\\.?[0-9]+$");
     }
-//    是否为整数
+
+    //    是否为整数
     private static boolean isInt(String str) {
         return str.matches("^[-+]?[1-9]\\d*$");
     }
 
-//    必须日期加时间 [2018-02-14 00:00:00] 使用反向引用进行简化，年份0001-9999，格式yyyy-MM-dd或yyyy-M-d，连字符可以没有或是“-”、“/”、“.”之一。
+    //    必须日期加时间 [2018-02-14 00:00:00] 使用反向引用进行简化，年份0001-9999，格式yyyy-MM-dd或yyyy-M-d，连字符可以没有或是“-”、“/”、“.”之一。
     private static boolean isDateAndTime(String str) {
         return str.matches("^(?:(?!0000)[0-9]{4}([-/.]?)(?:(?:0?[1-9]|1[0-2])\\1(?:0?[1-9]|1[0-9]|2[0-8])|(?:0?[13-9]|1[0-2])\\1(?:29|30)|(?:0?[13578]|1[02])\\1(?:31))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)([-/.]?)0?2\\2(?:29))\\s+([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$");
     }
-//    必须日期加时间 [2018-02-14] 使用反向引用进行简化，年份0001-9999，格式yyyy-MM-dd或yyyy-M-d，连字符可以没有或是“-”、“/”、“.”之一。
+
+    //    必须日期加时间 [2018-02-14] 使用反向引用进行简化，年份0001-9999，格式yyyy-MM-dd或yyyy-M-d，连字符可以没有或是“-”、“/”、“.”之一。
     private static boolean isDate(String str) {
         return str.matches("^(?:(?!0000)[0-9]{4}([-/.]?)(?:(?:0?[1-9]|1[0-2])([-/.]?)(?:0?[1-9]|1[0-9]|2[0-8])|(?:0?[13-9]|1[0-2])([-/.]?)(?:29|30)|(?:0?[13578]|1[02])([-/.]?)31)|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)([-/.]?)0?2([-/.]?)29)$");
     }
 }
 
+
 class UtilExcel {
     private String tableHeadName;// 表头名称
-    private int dataStarRow;// 插入数据开始的row
+    private Integer tableHeadRow;// 表头名称所在的行
+    private Integer fieldRow;// 字段所在的行
+    private Integer dataStarRow;// 插入数据开始的row
 
+    /**
+     * 默认sheet的信息<br/>
+     * tableHeadName = "export excel"<br/>
+     * fieldRow = 0<br/>
+     * dataStarRow = 1<br/>
+     */
     UtilExcel() {
         this.tableHeadName = "export excel";
-        this.dataStarRow = 1;
+        this.tableHeadRow = 0;
+        this.fieldRow = 1;
+        this.dataStarRow = 2;
     }
 
-    public UtilExcel(String tableHeadName, int dataStarRow) {
+    /**
+     * sheet的基本信息
+     *
+     * @param tableHeadName 表头名称
+     * @param fieldRow      sheet表格对应实体字段所在的行
+     */
+    public UtilExcel(String tableHeadName, int fieldRow) {
         this.tableHeadName = tableHeadName;
+        this.tableHeadRow = 0;// 如果fieldRow = tableHeadRow，则没有表头
+        this.fieldRow = fieldRow;
+        this.dataStarRow = fieldRow + 1;
+    }
+
+    /**
+     * sheet的基本信息
+     *
+     * @param tableHeadName 表头名称
+     * @param fieldRow      sheet表格字段所在的行
+     * @param dataStarRow   插入数据开始的行
+     */
+    public UtilExcel(String tableHeadName, int fieldRow, int dataStarRow) {
+        this.tableHeadName = tableHeadName;
+        if (fieldRow > 0) {
+            this.tableHeadRow = fieldRow - 1;// 如果fieldRow = tableHeadRow，则没有表头
+        } else {
+            this.tableHeadRow = 0;
+        }
+
+        this.fieldRow = fieldRow;
+        this.dataStarRow = dataStarRow;
+    }
+
+    /**
+     * sheet的基本信息
+     *
+     * @param tableHeadName 表头名称
+     * @param tableHeadRow  表头名称所在的行
+     * @param fieldRow      sheet表格字段所在的行
+     * @param dataStarRow   插入数据开始的行
+     */
+    public UtilExcel(String tableHeadName, int tableHeadRow, int fieldRow, int dataStarRow) {
+        this.tableHeadName = tableHeadName;
+        this.tableHeadRow = tableHeadRow;
+        this.fieldRow = fieldRow;
         this.dataStarRow = dataStarRow;
     }
 
@@ -475,11 +665,27 @@ class UtilExcel {
         this.tableHeadName = tableHeadName;
     }
 
-    public int getDataStarRow() {
+    public Integer getTableHeadRow() {
+        return tableHeadRow;
+    }
+
+    public void setTableHeadRow(Integer tableHeadRow) {
+        this.tableHeadRow = tableHeadRow;
+    }
+
+    public Integer getFieldRow() {
+        return fieldRow;
+    }
+
+    public void setFieldRow(Integer fieldRow) {
+        this.fieldRow = fieldRow;
+    }
+
+    public Integer getDataStarRow() {
         return dataStarRow;
     }
 
-    public void setDataStarRow(int dataStarRow) {
+    public void setDataStarRow(Integer dataStarRow) {
         this.dataStarRow = dataStarRow;
     }
 }
@@ -540,5 +746,83 @@ class MergeData {
 
     public void setEndCol(int endCol) {
         this.endCol = endCol;
+    }
+}
+
+class SheetExport {
+    private String sheetName;
+    private List<?> pojoList;
+    private LinkedHashMap<String, String> alias;
+    private UtilExcel utilExcel;
+    private List<MergeData> mergeDataList;
+
+    public String getSheetName() {
+        return sheetName;
+    }
+
+    public void setSheetName(String sheetName) {
+        if (!"".equals(sheetName)) this.sheetName = sheetName;
+    }
+
+    public List<?> getPojoList() {
+        return pojoList;
+    }
+
+    public void setPojoList(List<?> pojoList) {
+        this.pojoList = pojoList;
+    }
+
+    public LinkedHashMap<String, String> getAlias() {
+        return alias;
+    }
+
+    public void setAlias(LinkedHashMap<String, String> alias) {
+        this.alias = alias;
+    }
+
+    public UtilExcel getUtilExcel() {
+        return utilExcel;
+    }
+
+    public void setUtilExcel(UtilExcel utilExcel) {
+        this.utilExcel = utilExcel;
+    }
+
+    public List<MergeData> getMergeDataList() {
+        return mergeDataList;
+    }
+
+    public void setMergeDataList(List<MergeData> mergeDataList) {
+        this.mergeDataList = mergeDataList;
+    }
+}
+
+class SheetImport {
+    private Class<?> claz;
+    private LinkedHashMap<String, String> alias;
+    private Integer param;
+
+    public Class<?> getClaz() {
+        return claz;
+    }
+
+    public void setClaz(Class<?> claz) {
+        this.claz = claz;
+    }
+
+    public LinkedHashMap<String, String> getAlias() {
+        return alias;
+    }
+
+    public void setAlias(LinkedHashMap<String, String> alias) {
+        this.alias = alias;
+    }
+
+    public Integer getParam() {
+        return param;
+    }
+
+    public void setParam(Integer param) {
+        this.param = param;
     }
 }
